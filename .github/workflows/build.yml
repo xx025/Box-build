@@ -7,11 +7,11 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Box (build-installable)
+      - name: Checkout Box (main)
         uses: actions/checkout@v4
         with:
           repository: xx025/Box
-          ref: build-installable
+          ref: main
           fetch-depth: 0
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -64,8 +64,19 @@ jobs:
             echo "No APK or apksigner found; listing apk dir:"
             ls -la ${{ github.workspace }}/apk/ || true
           fi
-      - name: Upload App To Artifact
-        uses: actions/upload-artifact@v4
+      - name: Set release tag (time-based)
+        id: release
+        run: |
+          TAG="v$(date -u +%Y.%m.%d.%H%M%S)"
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "name=$TAG" >> $GITHUB_OUTPUT
+      - name: Create Release and upload APKs
+        uses: softprops/action-gh-release@v2
         with:
-          name: com.github.tvbox.osc
-          path: ${{ github.workspace }}/apk/*
+          tag_name: ${{ steps.release.outputs.tag }}
+          name: ${{ steps.release.outputs.name }}
+          body: "Box 可安装 APK，基于 [xx025/Box main](https://github.com/xx025/Box/tree/main) 构建。"
+          working_directory: ${{ github.workspace }}
+          files: apk/*.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
