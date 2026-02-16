@@ -6,6 +6,8 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write   # 创建 Release 并上传附件所需
     steps:
       - name: Checkout Box (main)
         uses: actions/checkout@v4
