@@ -1,0 +1,71 @@
+name: Build APK
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Box (build-installable)
+        uses: actions/checkout@v4
+        with:
+          repository: xx025/Box
+          ref: build-installable
+          fetch-depth: 0
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'tools platform-tools build-tools;34.0.0 platforms;android-34'
+      - name: Create local.properties
+        run: echo "sdk.dir=${ANDROID_SDK_ROOT:-$HOME/.android/sdk}" >> local.properties
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - name: Modify pyramid for CI
+        run: sed -i '/buildPython.*python.exe/d' pyramid/build.gradle
+      - name: Release Apk Sign
+        run: |
+          curl -sL -o app/TVBoxOSC.jks "https://github.com/j4Uq/TVBoxOSC/raw/master/.github/workflows/TVBoxOSC.jks"
+          signingConfigs='ICAgIHNpZ25pbmdDb25maWdzIHtcCiAgICAgICAgaWYgKHByb2plY3QuaGFzUHJvcGVydHkoIlJFTEVBU0VfU1RPUkVfRklMRSIpKSB7XAogICAgICAgICAgICBteUNvbmZpZyB7XAogICAgICAgICAgICAgICAgc3RvcmVGaWxlIGZpbGUoUkVMRUFTRV9TVE9SRV9GSUxFKVwKICAgICAgICAgICAgICAgIHN0b3JlUGFzc3dvcmQgUkVMRUFTRV9TVE9SRV9QQVNTV09SRFwKICAgICAgICAgICAgICAgIGtleUFsaWFzIFJFTEVBU0VfS0VZX0FMSUFTXAogICAgICAgICAgICAgICAga2V5UGFzc3dvcmQgUkVMRUFTRV9LRVlfUEFTU1dPUkRcCiAgICAgICAgICAgICAgICB2MVNpZ25pbmdFbmFibGVkIHRydWVcCiAgICAgICAgICAgICAgICB2MlNpZ25pbmdFbmFibGVkIHRydWVcCiAgICAgICAgICAgICAgICBlbmFibGVWM1NpZ25pbmcgPSB0cnVlXAogICAgICAgICAgICAgICAgZW5hYmxlVjRTaWduaW5nID0gdHJ1ZVwKICAgICAgICAgICAgfVwKICAgICAgICB9XAogICAgfVwKXA=='
+          signingConfig='ICAgICAgICAgICAgaWYgKHByb2plY3QuaGFzUHJvcGVydHkoIlJFTEVBU0VfU1RPUkVfRklMRSIpKSB7XAogICAgICAgICAgICAgICAgc2lnbmluZ0NvbmZpZyBzaWduaW5nQ29uZmlncy5teUNvbmZpZ1wKICAgICAgICAgICAgfVwK'
+          signingConfigs="$(echo "$signingConfigs" | base64 -d)"
+          signingConfig="$(echo "$signingConfig" | base64 -d)"
+          sed -i -e "/defaultConfig {/i\\$signingConfigs " -e "/debug {/a\\$signingConfig " -e "/release {/a\\$signingConfig " app/build.gradle
+          sed -i '$a\RELEASE_STORE_FILE=./TVBoxOSC.jks' ./gradle.properties
+          sed -i '$a\RELEASE_KEY_ALIAS=TVBoxOSC' ./gradle.properties
+          sed -i '$a\RELEASE_STORE_PASSWORD=TVBoxOSC' ./gradle.properties
+          sed -i '$a\RELEASE_KEY_PASSWORD=TVBoxOSC' ./gradle.properties
+      - name: Build With Gradle
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleArm64GenericNormalRelease assembleArmeabiGenericNormalRelease assembleArm64HisenseNormalRelease assembleArmeabiHisenseNormalRelease --build-cache --parallel --daemon --warning-mode all
+      - name: Prepare App
+        run: |
+          mkdir -p ${{ github.workspace }}/apk/
+          find . -name "*.apk" -type f | while read f; do mv "$f" ${{ github.workspace }}/apk/; done
+          ls -la ${{ github.workspace }}/apk/
+      - name: Verify APK signing
+        run: |
+          apk=$(ls ${{ github.workspace }}/apk/*.apk 2>/dev/null | head -1)
+          apksigner=$(ls $ANDROID_HOME/build-tools/*/apksigner 2>/dev/null | head -1)
+          if [ -n "$apk" ] && [ -n "$apksigner" ]; then
+            echo "Verifying signing of: $apk"
+            "$apksigner" verify -v --print-certs "$apk" || true
+            echo "--- META-INF (signature files) ---"
+            unzip -l "$apk" | grep -E "META-INF/(.*\.RSA|.*\.SF|.*\.MF)" || true
+          else
+            echo "No APK or apksigner found; listing apk dir:"
+            ls -la ${{ github.workspace }}/apk/ || true
+          fi
+      - name: Upload App To Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: com.github.tvbox.osc
+          path: ${{ github.workspace }}/apk/*
